@@ -1,0 +1,30 @@
+# Financial Dashboard
+
+A web-based financial dashboard that allows users to visualize and manipulate financial data through interactive formulas and sliders.
+
+## Features
+
+- Dynamic formula evaluation with variable substitution
+- Interactive sliders for adjusting financial parameters
+- Support for multiple currencies (EUR, USD, GBP, RUB)
+- Automatic formatting of monetary values
+- Real-time recalculation of all dependent values
+- Responsive design using Tailwind CSS
+
+## Usage
+
+## Setup
+
+1. Generate up-to-date forex data by running:
+   ```
+   bun update-forex.js
+   ```
+2. Define your financial data in `financials.js`
+3. Configure display settings for each section
+4. Open `index.html` in a browser to view and interact with your financial dashboard
+
+## Structure
+
+- `index.html` - Main dashboard interface
+- `financials.js` - Financial data and settings
+- `forex.js` - Currency exchange rate data

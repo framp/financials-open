@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Financial Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .formula {
+            font-family: monospace;
+            color: #6366f1;
+        }
+
+        .result {
+            font-weight: bold;
+        }
+    </style>
+</head>
+
+<body class="bg-gray-100 min-h-screen p-6">
+    <div class="container mx-auto">
+        <h1 class="text-3xl font-bold mb-8 text-center text-gray-800">Financial Dashboard</h1>
+        <div id="financialSections" class="space-y-6"></div>
+    </div>
+
+    <script src="./forex.js"></script>
+    <script src="./financials.js"></script>
+    <script>
+        // Store slider values
+        const sliderValues = {};
+
+        // Custom functions for formula evaluation
+        const customFunctions = {
+            slider: (sliderKey, min, max, defaultValue, step = 1) => {
+                return sliderValues[sliderKey] !== undefined ? sliderValues[sliderKey] : defaultValue;
+            },
+            compoundrate: (rate, years) => Math.pow(1 + rate, years),
+            min: Math.min,
+            max: Math.max,
+        };
+
+        // Evaluate a formula with variable substitution
+        function evaluateFormula(formula, variables, allData) {
+            // Track variables that have been expanded to detect circular dependencies
+            const expandedVars = new Set();
+            // Track the expansion history for error reporting
+            const expansionStack = [];
+
+            // Iteratively substitute variables until no more substitutions can be made
+            let currentFormula = formula;
+            let madeSubstitution = true;
+
+            while (madeSubstitution) {
+                madeSubstitution = false;
+
+                // Match variable names (including those with namespace notation)
+                const varRegex = /\b([A-Za-z][A-Za-z0-9]*(?:\.[A-Za-z][A-Za-z0-9]*)?)\b/g;
+                let match;
+                let newFormula = currentFormula;
+
+                while ((match = varRegex.exec(currentFormula)) !== null) {
+                    const varName = match[1];
+
+                    // // Skip if it's already been expanded in this iteration
+                    // if (expandedVars.has(varName)) {
+                    //     continue;
+                    // }
+
+                    // Check if it's a namespaced variable (contains a dot)
+                    let value;
+                    if (varName.includes('.')) {
+                        const [section, name] = varName.split('.');
+                        if (allData[section] && allData[section].find(item => Object.keys(item)[0] === name)) {
+                            const item = allData[section].find(item => Object.keys(item)[0] === name);
+                            value = item[name];
+
+                            // Recursively prefix variables in the value with the section name
+                            const sectionVars = extractVariables(allData[section]);
+                            const sectionVarRegex = /\b([A-Za-z][A-Za-z0-9\.]*)\b/g;
+                            let sectionVarMatch;
+                            let processedValue = value;
+
+                            while ((sectionVarMatch = sectionVarRegex.exec(value)) !== null) {
+                                const sectionVarName = sectionVarMatch[1];
+                                // Only replace if it's a variable in this section and not already namespaced
+                                if (sectionVars[sectionVarName] && !sectionVarName.includes('.')) {
+                                    processedValue = processedValue.replace(
+                                        new RegExp(`\\b${sectionVarName}\\b`, 'g'),
+                                        `${section}.${sectionVarName}`
+                                    );
+                                }
+                            }
+                            value = processedValue;
+                        }
+                    } else if (variables[varName]) {
+                        // Local variable in the current section
+                        value = variables[varName].formula;
+                    }
+
+                    if (value !== undefined) {
+                        // Check for circular dependency
+                        // if (expandedVars.has(varName)) {
+                        //     return `Error: Circular Dependency detected for ${varName}`;
+                        // }
+
+                        // Add to expansion stack for error reporting
+                        expansionStack.push({ varName, value });
+
+                        // Replace the variable with its value
+                        newFormula = newFormula.replace(new RegExp(`\\b${varName}\\b`, 'g'), `(${value})`);
+                        expandedVars.add(varName);
+                        madeSubstitution = true;
+                    }
+                }
+
+                currentFormula = newFormula;
+
+                // If we've made no substitutions in this pass, we're done
+                if (!madeSubstitution) {
+                    break;
+                }
+            }
+
+            // Parse and evaluate the final formula
+            try {
+                return parseAndEvaluate(currentFormula, forex);
+            } catch (error) {
+                // Create detailed error message with expansion stack
+                let errorMessage = `Error: ${error.message}\n\nExpansion Stack:\n`;
+                errorMessage += `Original formula: ${formula}\n`;
+                expansionStack.forEach((expansion, index) => {
+                    errorMessage += `${index + 1}. ${expansion.varName} → ${expansion.value}\n`;
+                });
+                errorMessage += `Final formula: ${currentFormula}`;
+                console.error("Error evaluating formula:", error, currentFormula, errorMessage);
+                return error.message;
+            }
+        }
+
+        // Parse and evaluate a mathematical expression
+        function parseAndEvaluate(expression, forexData) {
+            // Tokenize the expression
+            const tokens = tokenize(expression);
+
+            // Parse the tokens into an abstract syntax tree
+            const ast = parse(tokens);
+
+            // Evaluate the AST
+            return evaluate(ast, forexData);
+        }
+
+        // Tokenize the expression into tokens
+        function tokenize(expression) {
+            const tokenRegex = /\s*([0-9]+(?:\.[0-9]+)?|\+|\-|\*|\/|\%|\(|\)|\,|[A-Za-z][A-Za-z0-9]*(?:\.[A-Za-z][A-Za-z0-9]*)?)\s*/g;
+            const tokens = [];
+            let match;
+
+            while ((match = tokenRegex.exec(expression)) !== null) {
+                const token = match[1];
+                if (token.match(/^[0-9]+(?:\.[0-9]+)?$/)) {
+                    tokens.push({ type: 'number', value: parseFloat(token) });
+                } else if (token.match(/^[A-Za-z][A-Za-z0-9]*(?:\.[A-Za-z][A-Za-z0-9]*)?$/)) {
+                    tokens.push({ type: 'identifier', value: token });
+                } else {
+                    tokens.push({ type: 'operator', value: token });
+                }
+            }
+
+            return tokens;
+        }
+
+        // Parse tokens into an abstract syntax tree
+        function parse(tokens) {
+            let position = 0;
+
+            function parseExpression() {
+                return parseAdditive();
+            }
+
+            function parseAdditive() {
+                let left = parseMultiplicative();
+
+                while (position < tokens.length &&
+                    (tokens[position].type === 'operator' &&
+                        (tokens[position].value === '+' || tokens[position].value === '-'))) {
+                    const operator = tokens[position].value;
+                    position++;
+                    const right = parseMultiplicative();
+                    left = { type: 'binary', operator, left, right };
+                }
+
+                return left;
+            }
+
+            function parseMultiplicative() {
+                let left = parsePrimary();
+
+                while (position < tokens.length &&
+                    (tokens[position].type === 'operator' &&
+                        (tokens[position].value === '*' || tokens[position].value === '/'))) {
+                    const operator = tokens[position].value;
+                    position++;
+                    const right = parsePrimary();
+                    left = { type: 'binary', operator, left, right };
+                }
+
+                return left;
+            }
+
+            function parsePrimary() {
+                const token = tokens[position];
+
+                if (token.type === 'number') {
+                    position++;
+                    return { type: 'number', value: token.value };
+                } else if (token.type === 'identifier') {
+                    position++;
+
+                    // Check if it's a function call
+                    if (position < tokens.length && tokens[position].type === 'operator' && tokens[position].value === '(') {
+                        position++; // Skip '('
+                        const args = [];
+
+                        if (tokens[position].type !== 'operator' || tokens[position].value !== ')') {
+                            args.push(parseExpression());
+
+                            while (position < tokens.length && tokens[position].type === 'operator' && tokens[position].value === ',') {
+                                position++; // Skip ','
+                                args.push(parseExpression());
+                            }
+                        }
+
+                        if (position < tokens.length && tokens[position].type === 'operator' && tokens[position].value === ')') {
+                            position++; // Skip ')'
+                            return { type: 'function', name: token.value, args };
+                        } else {
+                            throw new Error('Expected closing parenthesis');
+                        }
+                    }
+
+                    return { type: 'identifier', name: token.value };
+                } else if (token.type === 'operator' && token.value === '(') {
+                    position++; // Skip '('
+                    const expr = parseExpression();
+
+                    if (position < tokens.length && tokens[position].type === 'operator' && tokens[position].value === ')') {
+                        position++; // Skip ')'
+                        return expr;
+                    } else {
+                        throw new Error('Expected closing parenthesis');
+                    }
+                } else if (token.type === 'operator' && token.value === '-') {
+                    position++; // Skip '-'
+                    const expr = parsePrimary();
+                    return { type: 'unary', operator: '-', operand: expr };
+                } else if (token.type === 'operator' && token.value === '%') {
+                    position++; // Skip '%'
+                    const expr = parsePrimary();
+                    return { type: 'unary', operator: '%', operand: expr };
+                }
+
+                throw new Error(`Unexpected token: ${JSON.stringify(token)}`);
+            }
+
+            const ast = parseExpression();
+
+            if (position !== tokens.length) {
+                throw new Error('Unexpected tokens after expression');
+            }
+
+            return ast;
+        }
+
+        // Evaluate the abstract syntax tree
+        function evaluate(ast, forexData) {
+            switch (ast.type) {
+                case 'number':
+                    return ast.value;
+
+                case 'binary':
+                    const left = evaluate(ast.left, forexData);
+                    const right = evaluate(ast.right, forexData);
+
+                    switch (ast.operator) {
+                        case '+': return left + right;
+                        case '-': return left - right;
+                        case '*': return left * right;
+                        case '/': return left / right;
+                        default: throw new Error(`Unknown binary operator: ${ast.operator}`);
+                    }
+
+                case 'unary':
+                    const operand = evaluate(ast.operand, forexData);
+
+                    switch (ast.operator) {
+                        case '-': return -operand;
+                        case '%': return operand / 100; // Percentage operator as unary
+                        default: throw new Error(`Unknown unary operator: ${ast.operator}`);
+                    }
+
+                case 'function':
+                    const args = ast.args.map(arg => evaluate(arg, forexData));
+
+                    if (customFunctions[ast.name]) {
+                        return customFunctions[ast.name](...args);
+                    } else {
+                        throw new Error(`Unknown function: ${ast.name}`);
+                    }
+
+                case 'identifier':
+                    throw new Error(`Unknown identifier: ${ast.name}`);
+
+                default:
+                    throw new Error(`Unknown AST node type: ${ast.type}`);
+            }
+        }
+
+        // Extract variables from section data
+        function extractVariables(sectionData) {
+            const variables = {};
+            for (const item of sectionData) {
+                const [varName, formula] = Object.entries(item)[0];
+                variables[varName] = { formula };
+            }
+            return variables;
+        }
+
+        // Check if a formula is a slider function
+        function isSliderFormula(formula) {
+            return formula.trim().startsWith('slider(') && formula.trim().endsWith(')');
+        }
+
+        // Extract slider parameters from formula
+        function extractSliderParams(formula) {
+            const paramsStr = formula.trim().substring(7, formula.length - 1);
+            const params = paramsStr.split(',');
+            const sliderId = params[0].trim();
+            const numericParams = params.slice(1).map(p => parseFloat(p.trim()));
+            return {
+                id: sliderId,
+                min: numericParams[0],
+                max: numericParams[1],
+                defaultValue: numericParams[2],
+                step: numericParams[3] !== undefined ? numericParams[3] : 1
+            };
+        }
+
+        function formatResult(result, sectionName, varName, precise = false) {
+            const sectionSettings = Object.assign({}, settings[sectionName] || {}, settings[sectionName] ? settings[sectionName][varName] || {} : {});
+            const unit = sectionSettings.unit || '';
+            const isMoney = sectionSettings.money === true;
+
+            let formattedResult;
+            if (precise) {
+                formattedResult = Math.abs(result).toLocaleString(undefined, { maximumFractionDigits: 20 });
+            } else if (isMoney && Math.abs(result) >= 1000000000) {
+                formattedResult = (Math.abs(result) / 1000000000).toFixed(2) + 'B';
+            } else if (isMoney && Math.abs(result) >= 1000000) {
+                formattedResult = (Math.abs(result) / 1000000).toFixed(2) + 'M';
+            } else if (isMoney && Math.abs(result) >= 10000) {
+                formattedResult = (Math.abs(result) / 1000).toFixed(2) + 'K';
+            } else {
+                formattedResult = Math.abs(result).toLocaleString(undefined, { maximumFractionDigits: 2 });
+            }
+
+            if (isMoney) {
+                if (result < 0) {
+                    return '- ' + unit + formattedResult;
+                } else {
+                    return unit + formattedResult;
+                }
+            } else {
+                return formattedResult + ' ' + unit;
+            }
+        }
+
+        // Render a financial section
+        function renderSection(sectionName, sectionData, allData) {
+            const variables = extractVariables(sectionData);
+
+            const sectionElement = document.createElement('div');
+            sectionElement.className = 'bg-white rounded-lg shadow-md p-6';
+            sectionElement.dataset.section = sectionName;
+
+            const sectionTitle = document.createElement('h2');
+            sectionTitle.className = 'text-2xl font-bold mb-4 text-indigo-700 border-b pb-2';
+            sectionTitle.textContent = sectionName;
+            sectionElement.appendChild(sectionTitle);
+
+            const variablesList = document.createElement('div');
+            variablesList.className = 'space-y-3';
+
+            for (const [varName, varData] of Object.entries(variables)) {
+                const varElement = document.createElement('div');
+                varElement.className = 'grid grid-cols-3 gap-4 items-center border-t border-gray-200 pt-3';
+                varElement.dataset.variable = varName;
+
+                const nameElement = document.createElement('div');
+                nameElement.className = 'font-medium text-gray-700';
+                nameElement.textContent = varName;
+
+                const formulaElement = document.createElement('div');
+                formulaElement.className = 'formula text-sm';
+
+                // Check if the formula is a slider
+                if (isSliderFormula(varData.formula)) {
+                    const sliderParams = extractSliderParams(varData.formula);
+
+                    // Create slider container
+                    const sliderContainer = document.createElement('div');
+                    sliderContainer.className = 'flex flex-col space-y-2';
+
+                    // Create slider controls wrapper
+                    const controlsWrapper = document.createElement('div');
+                    controlsWrapper.className = 'flex items-center space-x-2';
+
+                    // Create slider input
+                    const slider = document.createElement('input');
+                    slider.type = 'range';
+                    slider.min = sliderParams.min;
+                    slider.max = sliderParams.max;
+                    slider.step = sliderParams.step;
+
+                    // Use existing value if available, otherwise use default
+                    const currentValue = sliderValues[sliderParams.id] !== undefined ?
+                        sliderValues[sliderParams.id] : sliderParams.defaultValue;
+
+                    slider.value = currentValue;
+                    slider.className = 'w-full';
+
+                    // Create numeric input
+                    const numericInput = document.createElement('input');
+                    numericInput.type = 'number';
+                    numericInput.min = sliderParams.min;
+                    numericInput.max = sliderParams.max;
+                    numericInput.step = sliderParams.step;
+                    numericInput.value = currentValue;
+                    numericInput.className = 'w-32 text-sm p-1 border rounded';
+
+                    // Create value display
+                    const valueDisplay = document.createElement('span');
+                    valueDisplay.className = 'text-sm font-medium';
+                    valueDisplay.textContent = parseFloat(currentValue).toFixed(2);
+
+                    // Function to update values and re-render
+                    const updateValue = (value) => {
+                        const parsedValue = parseFloat(value);
+                        slider.value = parsedValue;
+                        numericInput.value = parsedValue;
+                        valueDisplay.textContent = parsedValue.toFixed(2);
+                        sliderValues[sliderParams.id] = parsedValue;
+
+                        // Re-render all formulas
+                        const sections = document.querySelectorAll('[data-section]');
+                        sections.forEach(section => {
+                            const sectionName = section.dataset.section;
+                            const sectionData = data[sectionName];
+                            const newSection = renderSection(sectionName, sectionData, data);
+                            section.replaceWith(newSection);
+                        });
+                    };
+
+                    // Add event listener to slider
+                    slider.addEventListener('change', function () {
+                        updateValue(this.value);
+                    });
+
+                    // Add event listener to numeric input
+                    numericInput.addEventListener('change', function () {
+                        // Ensure value is within bounds
+                        let value = parseFloat(this.value);
+                        value = Math.max(sliderParams.min, Math.min(sliderParams.max, value));
+                        updateValue(value);
+                    });
+
+                    controlsWrapper.appendChild(slider);
+                    controlsWrapper.appendChild(numericInput);
+
+                    sliderContainer.appendChild(controlsWrapper);
+                    sliderContainer.appendChild(valueDisplay);
+
+                    formulaElement.textContent = ''; // Clear the text content
+                    formulaElement.appendChild(sliderContainer);
+                } else {
+                    // Format formula with spaces between operators
+                    const formattedFormula = varData.formula.replace(/([+\-*/=<>!&|^%])/g, ' $1 ')
+                        .replace(/\(/g, '(')
+                        .replace(/\)/g, ')')
+                        .replace(/\s+/g, ' ')
+                        .trim();
+
+                    // Clear existing content
+                    formulaElement.textContent = '';
+
+                    // Split the formula to identify variables and operators
+                    const tokens = formattedFormula.split(' ');
+
+                    tokens.forEach(token => {
+                        if (token.match(/^[A-Za-z][A-Za-z0-9.]*$/)) {
+                            // This is likely a variable
+                            const varSpan = document.createElement('span');
+                            varSpan.textContent = token;
+                            varSpan.className = 'cursor-help relative';
+
+                            // Create tooltip for variable
+                            const tooltip = document.createElement('div');
+                            tooltip.className = 'absolute hidden group-hover:block bg-gray-800 text-white text-xs rounded p-2 z-10 -mt-16 -ml-3 shadow-lg';
+                            tooltip.style.minWidth = '120px';
+
+                            try {
+                                const value = evaluateFormula(token, variables, allData);
+                                const targetSection = token.includes('.') ? token.split('.')[0] : sectionName;
+                                const targetVar = token.includes('.') ? token.split('.')[1] : token;
+                                tooltip.textContent = `${token} = ${formatResult(value, targetSection, targetVar, true)}`;
+                            } catch (e) {
+                                tooltip.textContent = `${token} (undefined)`;
+                            }
+
+                            // Wrap in a group for hover state
+                            const group = document.createElement('span');
+                            group.className = 'group inline-block';
+                            group.appendChild(varSpan);
+                            group.appendChild(tooltip);
+
+                            formulaElement.appendChild(group);
+                        } else {
+                            // This is an operator or other token
+                            formulaElement.appendChild(document.createTextNode(" " + token + " "));
+                        }
+                    });
+
+                    // Add selection evaluation functionality
+                    varElement.addEventListener('mouseup', function () {
+                        const selection = window.getSelection();
+                        if (selection.toString().trim()) {
+                            try {
+                                const selectedFormula = selection.toString();
+                                const result = evaluateFormula(selectedFormula, variables, allData);
+                                // Create tooltip element on the fly
+                                const tooltip = document.createElement('div');
+                                tooltip.className = 'absolute bg-indigo-600 text-white text-xs rounded p-2 z-10 -ml-3 shadow-lg';
+                                tooltip.textContent = `= ${typeof result === 'number' ? formatResult(result, sectionName, undefined, true) : result}`;
+
+                                document.body.appendChild(tooltip);
+
+                                // Position tooltip above selection
+                                const range = selection.getRangeAt(0);
+                                const rect = range.getBoundingClientRect();
+                                tooltip.style.top = `${rect.top + window.scrollY - tooltip.offsetHeight - 10}px`;
+                                tooltip.style.left = `${rect.left + window.scrollX}px`;
+                                tooltip.style.display = 'block';
+                                // Hide tooltip when selection is cleared
+                                const clearTooltip = () => {
+                                    const existingTooltips = document.querySelectorAll('div.absolute.bg-indigo-600');
+                                    existingTooltips.forEach(t => t.remove());
+                                };
+
+                                // Add event listeners to hide tooltip when selection changes
+                                document.addEventListener('selectionchange', () => {
+                                    if (window.getSelection().toString().trim() === '') {
+                                        clearTooltip();
+                                    }
+                                });
+
+                                // Also hide on click elsewhere
+                                document.addEventListener('mousedown', (e) => {
+                                    if (!e.target.closest('.formula')) {
+                                        clearTooltip();
+                                    }
+                                }, { once: true });
+
+                            } catch (e) {
+                                console.error('Error evaluating selection:', e);
+                            }
+                        }
+                    });
+                }
+                const resultElement = document.createElement('div');
+                resultElement.className = 'result text-right cursor-help relative';
+
+                // Immediate evaluation instead of lazy
+                const result = evaluateFormula(varData.formula, variables, allData);
+
+                // Create tooltip for result
+                const tooltip = document.createElement('div');
+                tooltip.className = 'absolute hidden group-hover:block bg-gray-800 text-white text-xs rounded p-2 z-10 -mt-16 right-0 shadow-lg';
+                tooltip.style.minWidth = '120px'
+
+                if (typeof result === 'number') {
+                    resultElement.textContent = formatResult(result, sectionName, varName);
+                    tooltip.textContent = `${varName} = ${formatResult(result, sectionName, varName, true)}`;
+                } else {
+                    resultElement.textContent = result;
+                    tooltip.textContent = result;
+                }
+
+                // Wrap in a group for hover state
+                const resultGroup = document.createElement('span');
+                resultGroup.className = 'group inline-block relative';
+                resultGroup.appendChild(resultElement);
+                resultGroup.appendChild(tooltip);
+
+                varElement.appendChild(nameElement);
+                varElement.appendChild(formulaElement);
+                varElement.appendChild(resultGroup);
+
+                variablesList.appendChild(varElement);
+            }
+
+            sectionElement.appendChild(variablesList);
+            return sectionElement;
+        }
+
+        // Initialize the dashboard
+        async function initDashboard() {
+
+            // Add forex data as a section
+            if (typeof forex !== 'undefined') {
+                // Convert forex object to the expected format
+                const forexSection = [];
+                for (const [key, value] of Object.entries(forex)) {
+                    forexSection.push({ [key]: value });
+                }
+                data.Forex = forexSection;
+            }
+
+            const sectionsContainer = document.getElementById('financialSections');
+
+            for (const [sectionName, sectionData] of Object.entries(data)) {
+                const sectionElement = renderSection(sectionName, sectionData, data);
+                sectionsContainer.appendChild(sectionElement);
+            }
+        }
+
+        // Start the application when the page loads
+        window.addEventListener('DOMContentLoaded', initDashboard);
+    </script>
+</body>
+
+</html>
