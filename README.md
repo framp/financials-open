@@ -20,8 +20,7 @@ A web-based financial dashboard that allows users to visualize and manipulate fi
    bun update-forex.js
    ```
 2. Define your financial data in `financials.js`
-3. Configure display settings for each section
-4. Open `index.html` in a browser to view and interact with your financial dashboard
+3. Open `index.html` in a browser to view and interact with your financial dashboard
 
 ## Structure
 
