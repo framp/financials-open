@@ -1,5 +1,6 @@
+[<img width="2146" height="1762" alt="CleanShot 2025-11-07 at 11 49 13@2x" src="https://github.com/user-attachments/assets/bad8d166-a98f-4d6f-a438-69c9abd6e3e5" />](https://framp.me/financials-open/)
 
-<img width="2146" height="1762" alt="CleanShot 2025-11-07 at 11 49 13@2x" src="https://github.com/user-attachments/assets/bad8d166-a98f-4d6f-a438-69c9abd6e3e5" />
+[Demo](https://framp.me/financials-open/)
 
 # Financial Dashboard
 
