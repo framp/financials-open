@@ -1,6 +1,7 @@
-# Financial Dashboard
 
 <img width="2146" height="1762" alt="CleanShot 2025-11-07 at 11 49 13@2x" src="https://github.com/user-attachments/assets/bad8d166-a98f-4d6f-a438-69c9abd6e3e5" />
+
+# Financial Dashboard
 
 A web-based financial dashboard that allows users to visualize and manipulate financial data through interactive formulas and sliders.
 
